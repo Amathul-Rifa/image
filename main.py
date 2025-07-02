@@ -2,6 +2,12 @@ import streamlit as st
 from PIL import Image
 import io
 import pandas as pd
+
+# API Endpoints
+API_URL_GENDER = "https://api-inference.huggingface.co/models/rizandwiki/gender-classification"
+API_URL_DETECTOR = "https://api-inference.huggingface.co/models/umm-maybe/AI-image-detector"
+headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+
 import requests
 from dotenv import load_dotenv
 import os
@@ -10,10 +16,6 @@ import os
 load_dotenv()
 HF_TOKEN = os.getenv("HUGGINGFACE_API_KEY")
 
-# API Endpoints
-GENDER_MODEL_URL = "https://api-inference.huggingface.co/models/nateraw/vit-gender-classifier"
-AI_DETECTOR_URL = "https://api-inference.huggingface.co/models/umm-maybe/AI-image-detector"
-HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
 
 
 # ------------ API Functions ------------
@@ -23,37 +25,15 @@ def query_gender(image):
     image_bytes = io.BytesIO()
     image.save(image_bytes, format='JPEG')
     image_bytes.seek(0)
-
-    headers = {
-        "Authorization": f"Bearer {HF_TOKEN}",
-        "Content-Type": "application/octet-stream"
-    }
-
-    response = requests.post(GENDER_MODEL_URL, headers=headers, data=image_bytes.getvalue())
-
-    if response.status_code == 503:
-        return {"error": "Model is loading, please wait and try again."}
-    elif response.status_code != 200:
-        return {
-            "error": f"API Error {response.status_code}",
-            "details": response.text
-        }
-
-    try:
-        return response.json()
-    except Exception as e:
-        return {"error": f"Failed to parse response: {e}"}
+    
+    response = requests.post(API_URL_GENDER, headers=headers, data=image_bytes)
+    return response
 
 
 def query_detector(image_bytes):
-    response = requests.post(AI_DETECTOR_URL, headers=HEADERS, data=image_bytes)
-    try:
-        return response.json()
-    except Exception:
-        return None
+    response = requests.post(API_URL_DETECTOR, headers=headers, data=image_bytes)
+    response.json()
 
-
-# ------------ Streamlit Pages ------------
 
 def gender_classification():
     st.header("🚻 Gender Classification")
@@ -62,13 +42,9 @@ def gender_classification():
     if uploaded_file is not None:
         image = Image.open(uploaded_file)
         st.image(image, caption="Uploaded Image", use_container_width=True)
-
-        if not HF_TOKEN:
-            st.error("API key missing. Check your .env file.")
-            return
-
+        
         with st.spinner("Classifying..."):
-            result = query_gender(image)
+            response = query_gender(image)
 
         if isinstance(result, dict) and "error" in result:
             st.error(result["error"])
