@@ -3,122 +3,136 @@ from PIL import Image
 import io
 import pandas as pd
 import requests
-from dotenv import load_dotenv
 import os
+from dotenv import load_dotenv
 
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
-
-# Get API key from environment variable
 api_key = os.getenv("HUGGINGFACE_API_KEY")
 
-# Hugging Face API URLs
-API_URL_GENDER = "https://api-inference.huggingface.co/models/rizvandwiki/gender-classification"
+# API URLs
+API_URL_GENDER = "https://api-inference.huggingface.co/models/mrm8488/deepface-gender"
 API_URL_DETECTOR = "https://api-inference.huggingface.co/models/umm-maybe/AI-image-detector"
 
-# Set headers
+# Headers
 headers = {"Authorization": f"Bearer {api_key}"}
 
-
+# Query gender model
 def query_gender(image):
     image = image.convert('RGB')
     image_bytes = io.BytesIO()
     image.save(image_bytes, format='JPEG')
     image_bytes.seek(0)
-    response = requests.post(API_URL_GENDER, headers=headers, data=image_bytes)
-    return response
+    try:
+        response = requests.post(API_URL_GENDER, headers=headers, data=image_bytes, timeout=30)
+        return response
+    except requests.exceptions.Timeout:
+        return None
 
+# Query detector model
 def query_detector(image_bytes):
-    response = requests.post(API_URL_DETECTOR, headers=headers, data=image_bytes)
-    return response.json()
+    try:
+        response = requests.post(API_URL_DETECTOR, headers=headers, data=image_bytes, timeout=30)
+        return response.json()
+    except requests.exceptions.Timeout:
+        return None
 
+# Gender classification page
 def gender_classification():
-    st.title("Gender Classification")
+    st.title("🧑 Gender Classification")
     uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
-    
-    if uploaded_file is not None:
+
+    if uploaded_file:
         image = Image.open(uploaded_file)
-        st.image(image, caption='Uploaded Image.', use_column_width=True)
-        
-        with st.spinner('Classifying...'):
+        st.image(image, caption='Uploaded Image', use_container_width=True)
+
+        with st.spinner("Classifying..."):
             response = query_gender(image)
-        
-        st.write("API Response Status Code:", response.status_code)
 
-        if response.status_code == 200:
+        if response is None:
+            st.error("❌ Request timed out. Try again later.")
+        elif response.status_code != 200:
+            st.error(f"❌ API error. Status code: {response.status_code}")
+        else:
             result = response.json()
-            if isinstance(result, list) and len(result) > 0:
-                df = pd.DataFrame(result)
-                st.write("API Response:")
-                st.table(df)
+            st.json(result)
 
+            if isinstance(result, list) and all(isinstance(i, dict) for i in result):
+                df = pd.DataFrame(result)
+                st.write("API Response Table:")
+                st.table(df)
                 top_result = df.loc[df['score'].idxmax()]
                 label = top_result['label']
                 score = top_result['score']
-                st.write(f"The person in the image is likely to be **{label}** with a score of **{score:.2f}**.")
+                st.success(f"**Prediction:** {label} with confidence **{score:.2f}**")
             else:
-                st.write("Unexpected response format.")
-        else:
-            st.write("Failed to get a valid response from the API.")
+                st.warning("⚠️ Unexpected API response format.")
 
+# AI Image Detector page
 def ai_image_detector():
-    st.title("AI Image Detector")
+    st.title("🕵️ AI Image Detector")
     uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
-    
-    if uploaded_file is not None:
-        st.image(uploaded_file, caption='Uploaded Image.', use_column_width=True)
+
+    if uploaded_file:
+        st.image(uploaded_file, caption='Uploaded Image', use_container_width=True)
         image_bytes = uploaded_file.read()
 
         with st.spinner("Analyzing..."):
             result = query_detector(image_bytes)
 
-        if result:
+        if result is None:
+            st.error("❌ Request timed out. Try again.")
+        elif isinstance(result, list) and all(isinstance(i, dict) for i in result):
+            st.json(result)
             df = pd.DataFrame(result)
-            st.write("API Response:")
+            st.write("API Response Table:")
             st.table(df)
 
-            if not df.empty:
-                top_result = df.loc[df['score'].idxmax()]
-                label = top_result["label"]
-                score = top_result["score"]
-                st.write(f"The image is likely **{label}** with a score of **{score:.2f}**.")
+            top_result = df.loc[df['score'].idxmax()]
+            label = top_result["label"]
+            score = top_result["score"]
+            st.success(f"**Prediction:** {label} with confidence **{score:.2f}**")
         else:
-            st.write("Failed to get a valid response from the API.")
+            st.warning("⚠️ Unexpected API response format.")
 
+# Is Image Artificial? page
 def is_artificial_detector():
-    st.title("Is Image Artificial?")
+    st.title("🤖 Is the Image Artificial?")
     uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
-    
-    if uploaded_file is not None:
-        st.image(uploaded_file, caption='Uploaded Image.', use_column_width=True)
+
+    if uploaded_file:
+        st.image(uploaded_file, caption='Uploaded Image', use_container_width=True)
         image_bytes = uploaded_file.read()
 
         with st.spinner("Analyzing..."):
             result = query_detector(image_bytes)
 
-        if result:
-            is_artificial = False
-            for item in result:
-                if item['label'].lower() == 'artificial' and item['score'] > 0.20:
-                    is_artificial = True
-                    break
+        if result is None:
+            st.error("❌ Request timed out.")
+        elif isinstance(result, list):
+            is_artificial = any(
+                item.get('label', '').lower() == 'artificial' and item.get('score', 0) > 0.20
+                for item in result
+            )
+            st.json(result)
             if is_artificial:
-                st.write("🔍 The image may be **artificially generated**.")
+                st.warning("⚠️ The image may be **artificially generated**.")
             else:
-                st.write("✅ The image is likely **human-made**.")
+                st.success("✅ The image is likely **human-made**.")
         else:
-            st.write("Failed to get a valid response from the API.")
+            st.warning("⚠️ Unexpected API response format.")
 
+# Main app
 def main():
-    st.set_page_config(page_title="AI Image Tools", page_icon=":robot:")
-    st.sidebar.title("Navigation")
-    selection = st.sidebar.radio("Go to", ["Gender Classification", "AI Image Detector", "Is Image Artificial?"])
+    st.set_page_config(page_title="AI Image Tools", page_icon="🤖")
+    st.sidebar.title("🔍 Navigation")
+    choice = st.sidebar.radio("Go to", ["Gender Classification", "AI Image Detector", "Is Image Artificial?"])
 
-    if selection == "Gender Classification":
+    if choice == "Gender Classification":
         gender_classification()
-    elif selection == "AI Image Detector":
+    elif choice == "AI Image Detector":
         ai_image_detector()
-    elif selection == "Is Image Artificial?":
+    elif choice == "Is Image Artificial?":
         is_artificial_detector()
 
 if __name__ == "__main__":
